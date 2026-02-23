@@ -1,0 +1,44 @@
+steps:
+  # Step 1: Docker image build
+  # Use substitutions (${_...}) to make the file reusable
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build', 
+      '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/bnr-import:latest',
+      '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/bnr-import:${BUILD_ID}',
+      '.'
+    ]
+
+  # Step 2: Push image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/bnr-import'
+    ]
+
+  # Step 3 (Optional): Update Cloud Run Job to use the new image ONLY if it exists
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if gcloud run jobs describe bnr-data-import --region=${_REGION} > /dev/null 2>&1; then
+          echo "Job exists, updating..."
+          gcloud run jobs update bnr-data-import \
+            --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/bnr-import:${BUILD_ID} \
+            --region=${_REGION}
+        else
+          echo "Job bnr-data-import does not exist yet. Skipping update."
+        fi
+
+# Final image to be marked as an "artifact" of this build
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/bnr-import:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/bnr-import:${BUILD_ID}'
+
+# Default values for substitution variables
+substitutions:
+  _REGION: europe-west3
+  _REPO_NAME: bnr-import-repo
+
+options:
+  logging: LEGACY

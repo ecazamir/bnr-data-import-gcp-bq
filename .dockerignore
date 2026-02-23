@@ -1,0 +1,15 @@
+# Exclude Terraform
+01_build_tooling/
+02_app_infrastructure/
+*.tf
+*.tfvars
+.terraform/
+
+# Exclude Git & Docs
+.git
+.gitignore
+README.md
+migrate_history.sh
+
+# Exclude Python temp
+__pycache__/
