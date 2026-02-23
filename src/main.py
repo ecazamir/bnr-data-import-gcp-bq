@@ -6,13 +6,13 @@ import pandas as pd
 from google.cloud import bigquery
 from datetime import datetime, timezone
 
-# Configurare Logging
+# Setup Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configurații din variabile de mediu (setate prin Terraform/Job)
+# Configuration from environment variables (set via Terraform/Job)
 TABLE_ID = os.getenv("TABLE_ID")
-IMPORT_MODE = os.getenv("IMPORT_MODE", "daily") # 'daily' sau 'history'
+IMPORT_MODE = os.getenv("IMPORT_MODE", "daily") # 'daily' or 'history'
 IMPORT_YEAR = os.getenv("IMPORT_YEAR")
 NAMESPACE = {'ns': 'http://www.bnr.ro/xsd'}
 
@@ -25,7 +25,7 @@ def parse_xml_to_df(xml_content):
     root = ET.fromstring(xml_content)
     records = []
     
-    # Căutăm elementele <Cube> (pot fi mai multe în fișierele istorice)
+    # Search for <Cube> elements (there can be multiple in historical files)
     for cube in root.findall('.//ns:Cube', NAMESPACE):
         date_str = cube.get('date')
         for rate in cube.findall('ns:Rate', NAMESPACE):
@@ -46,28 +46,28 @@ def parse_xml_to_df(xml_content):
 
 def run_etl():
     if not TABLE_ID:
-        raise ValueError("Variabila de mediu TABLE_ID nu este setată.")
+        raise ValueError("Environment variable TABLE_ID is not set.")
 
     client = bigquery.Client()
     url = get_bnr_url()
     
-    logger.info(f"Se descarcă datele de la: {url}")
+    logger.info(f"Downloading data from: {url}")
     response = requests.get(url, timeout=60)
     response.raise_for_status()
     
     df = parse_xml_to_df(response.content)
     if df is None:
-        logger.warning("Nu s-au găsit date de procesat.")
+        logger.warning("No data found to process.")
         return
 
-    # Creăm un tabel temporar pentru operațiunea MERGE
+    # Create a temporary table for the MERGE operation
     temp_table_id = f"{TABLE_ID}_temp_{int(datetime.now().timestamp())}"
     
-    logger.info(f"Încărcare date în tabelul temporar {temp_table_id}")
+    logger.info(f"Loading data into temporary table {temp_table_id}")
     job_config = bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE")
     client.load_table_from_dataframe(df, temp_table_id, job_config=job_config).result()
 
-    # Executăm MERGE pentru a asigura idempotența (Update if exists, Insert if new)
+    # Execute MERGE to ensure idempotency (Update if exists, Insert if new)
     merge_query = f"""
     MERGE `{TABLE_ID}` T
     USING `{temp_table_id}` S
@@ -79,16 +79,16 @@ def run_etl():
       UPDATE SET value = S.value, ingested_at = S.ingested_at
     """
     
-    logger.info("Execuție MERGE în BigQuery...")
+    logger.info("Executing MERGE in BigQuery...")
     client.query(merge_query).result()
     
-    # Curățenie: Ștergem tabelul temporar
+    # Cleanup: Delete the temporary table
     client.delete_table(temp_table_id, not_found_ok=True)
-    logger.info(f"Import finalizat cu succes: {len(df)} rânduri procesate.")
+    logger.info(f"Import successfully completed: {len(df)} rows processed.")
 
 if __name__ == "__main__":
     try:
         run_etl()
     except Exception as e:
-        logger.error(f"Eroare critică în timpul execuției: {e}")
-        exit(1) # Cod non-zero pentru a declanșa Retry/Alertă în GCP
+        logger.error(f"Critical error during execution: {e}")
+        exit(1) # Non-zero exit code to trigger Retry/Alert in GCP
