@@ -21,6 +21,16 @@ def get_bnr_url():
         return f"https://www.bnr.ro/files/xml/years/nbrfxrates{IMPORT_YEAR}.xml"
     return "https://www.bnr.ro/nbrfxrates.xml"
 
+def safe_float(value):
+    """Safely converts string to float, returning None if invalid."""
+    if not value or value.strip() in ("-", "NaN", "null"):
+        return None
+    try:
+        # Some XMLs use commas for decimals depending on locale
+        return float(value.replace(',', '.')) 
+    except (ValueError, TypeError):
+        return None
+
 def parse_xml_to_df(xml_content):
     root = ET.fromstring(xml_content)
     records = []
@@ -29,13 +39,18 @@ def parse_xml_to_df(xml_content):
     for cube in root.findall('.//ns:Cube', NAMESPACE):
         date_str = cube.get('date')
         for rate in cube.findall('ns:Rate', NAMESPACE):
-            records.append({
-                "date": date_str,
-                "currency": rate.get('currency'),
-                "value": float(rate.text),
-                "multiplier": int(rate.get('multiplier', 1)),
-                "ingested_at": datetime.now(timezone.utc)
-            })
+            raw_val = rate.text
+            parsed_val = safe_float(raw_val)
+            
+            # Strategy: Only append if we actually have a numeric value
+            if parsed_val is not None:
+                records.append({
+                    "date": date_str,
+                    "currency": rate.get('currency'),
+                    "value": parsed_val,
+                    "multiplier": int(rate.get('multiplier', 1)),
+                    "ingested_at": datetime.now(timezone.utc)
+                })
             
     if not records:
         return None
